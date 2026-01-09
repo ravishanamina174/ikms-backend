@@ -73,7 +73,7 @@ def index_documents(file_path: Path) -> int:
     docs = loader.load()
 
    
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=100, chunk_overlap=0)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
     texts = text_splitter.split_documents(docs)
 
     vector_store = _get_vector_store()

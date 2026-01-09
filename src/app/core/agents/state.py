@@ -13,6 +13,8 @@ class QAState(TypedDict):
     """
 
     question: str
+    plan: str | None  # Natural language search strategy
+    sub_questions: list[str] | None  # Decomposed questions
     context: str | None
     draft_answer: str | None
     answer: str | None

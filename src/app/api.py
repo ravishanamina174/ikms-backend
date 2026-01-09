@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from .models import QuestionRequest, QAResponse
 from .services.qa_service import answer_question
+import openai
 from .services.indexing_service import index_pdf_file
 
 
@@ -61,11 +62,32 @@ async def qa_endpoint(payload: QuestionRequest) -> QAResponse:
         )
 
     # Delegate to the service layer which runs the multi-agent QA graph
-    result = answer_question(question)
+    try:
+        result = answer_question(question)
+    except Exception as exc:
+        # If the error is an OpenAI authentication/authorization issue,
+        # return a helpful placeholder response instead of a 500 so the
+        # `/qa` endpoint remains reachable for testing (Postman, etc.).
+        if getattr(exc, "__class__", None) is not None and (
+            exc.__class__.__name__ == "AuthenticationError"
+            or "Incorrect API key" in str(exc)
+        ):
+            return QAResponse(
+                answer=(
+                    "LLM unavailable: invalid or missing OpenAI API key. "
+                    "Configure `OPENAI_API_KEY` in the environment or `.env` file."
+                ),
+                context="",
+            )
+        # Re-raise other unexpected exceptions to be handled by the
+        # global exception handler.
+        raise
 
+    # Return only the fields defined by QAResponse
     return QAResponse(
         answer=result.get("answer", ""),
         context=result.get("context", ""),
+        # plan=result.get("plan", ""),
     )
 
 

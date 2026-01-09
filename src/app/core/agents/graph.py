@@ -6,7 +6,7 @@ from typing import Any, Dict
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 
-from .agents import retrieval_node, summarization_node, verification_node
+from .agents import planning_node,retrieval_node, summarization_node, verification_node
 from .state import QAState
 
 
@@ -24,12 +24,14 @@ def create_qa_graph() -> Any:
     builder = StateGraph(QAState)
 
     # Add nodes for each agent
+    builder.add_node("planning", planning_node)
     builder.add_node("retrieval", retrieval_node)
     builder.add_node("summarization", summarization_node)
     builder.add_node("verification", verification_node)
 
     # Define linear flow: START -> retrieval -> summarization -> verification -> END
-    builder.add_edge(START, "retrieval")
+    builder.add_edge(START, "planning")
+    builder.add_edge("planning", "retrieval")
     builder.add_edge("retrieval", "summarization")
     builder.add_edge("summarization", "verification")
     builder.add_edge("verification", END)
@@ -64,6 +66,8 @@ def run_qa_flow(question: str) -> Dict[str, Any]:
 
     initial_state: QAState = {
         "question": question,
+        "plan":None, 
+        "sub_questions":None,
         "context": None,
         "draft_answer": None,
         "answer": None,
@@ -75,4 +79,6 @@ def run_qa_flow(question: str) -> Dict[str, Any]:
         "answer": final_state.get("answer", ""),
         "draft_answer": final_state.get("draft_answer", ""),
         "context": final_state.get("context", ""),
+        "plan": final_state.get("plan", ""),
+        "sub_questions": final_state.get("sub_questions", ""),
     }

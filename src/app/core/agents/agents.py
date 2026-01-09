@@ -3,7 +3,7 @@
 This module defines three LangChain agents (Retrieval, Summarization,
 Verification) and thin node functions that LangGraph uses to invoke them.
 """
-
+import json
 from typing import List
 
 from langchain.agents import create_agent
@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ..llm.factory import create_chat_model
 from .prompts import (
+    PLANNING_SYSTEM_PROMPT,
     RETRIEVAL_SYSTEM_PROMPT,
     SUMMARIZATION_SYSTEM_PROMPT,
     VERIFICATION_SYSTEM_PROMPT,
@@ -26,6 +27,11 @@ def _extract_last_ai_content(messages: List[object]) -> str:
             return str(msg.content)
     return ""
 
+planning_agent = create_agent(
+    model=create_chat_model(),
+    tools=[],
+    system_prompt=PLANNING_SYSTEM_PROMPT,
+)
 
 retrieval_agent = create_agent(
     model=create_chat_model(),
@@ -45,34 +51,59 @@ verification_agent = create_agent(
     system_prompt=VERIFICATION_SYSTEM_PROMPT,
 )
 
+def planning_node(state: QAState) -> QAState:
+    
+    question = state["question"]
+    result = planning_agent.invoke({"messages": [HumanMessage(content=question)]})
+    output_text = result["messages"][-1].content  # Get the assistant's final message content 
+    Structured_plan = json.loads(output_text) # Parse JSON safely
+
+    return {
+        "plan": Structured_plan["plan"],
+        "sub_questions": Structured_plan["sub_questions"]
+    }
 
 
 
 def retrieval_node(state: QAState) -> QAState:
-    """Retrieval Agent node: gathers context from vector store.
+        """Retrieval Agent node: gathers context from vector store.
 
-    This node:
-    - Sends the user's question to the Retrieval Agent.
-    - The agent uses the attached retrieval tool to fetch document chunks.
-    - Extracts the tool's content (CONTEXT string) from the ToolMessage.
-    - Stores the consolidated context string in `state["context"]`.
-    """
-    question = state["question"]
+        This node:
+        - Sends the user's question and plan (if available) to the Retrieval Agent.
+        - If a plan exists, uses sub_questions for multiple retrieval tool calls.
+        - The agent uses the attached retrieval tool to fetch document chunks.
+        - Extracts the tool's content (CONTEXT string) from the ToolMessage.
+        - Stores the consolidated context string in `state["context"]`.
+        """
+        question = state["question"]
+        plan = state.get("plan")
+        sub_questions = state.get("sub_questions", [])
 
-    result = retrieval_agent.invoke({"messages": [HumanMessage(content=question)]})
+        # Build user content with question and plan if available
+        user_content = f"Question: {question}"
+        if plan:
+            user_content += f"\n\nPlan: {plan}"
+            if sub_questions:
+                user_content += f"\n\nSub-questions to address:\n" + "\n".join(
+                    f"- {sq}" for sq in sub_questions
+                )
 
-    messages = result.get("messages", [])
-    context = ""
+        result = retrieval_agent.invoke({"messages": [HumanMessage(content=user_content)]})
 
-    # Prefer the last ToolMessage content (from retrieval_tool)
-    for msg in reversed(messages):
-        if isinstance(msg, ToolMessage):
-            context = str(msg.content)
-            break
+        messages = result.get("messages", [])
+        context = ""
 
-    return {
-        "context": context,
-    }
+        # Collect all ToolMessage contents (from retrieval_tool calls)
+        tool_contents = []
+        for msg in messages:
+            if isinstance(msg, ToolMessage):
+                tool_contents.append(str(msg.content))
+
+        context = "\n\n".join(tool_contents) if tool_contents else ""
+
+        return {
+            "context": context,
+        }
 
 
 def summarization_node(state: QAState) -> QAState:
@@ -113,11 +144,9 @@ def verification_node(state: QAState) -> QAState:
 
     user_content = f"""Question: {question}
 
-Context:
-{context}
+Context:{context}
 
-Draft Answer:
-{draft_answer}
+Draft Answer:{draft_answer}
 
 Please verify and correct the draft answer, removing any unsupported claims."""
 
