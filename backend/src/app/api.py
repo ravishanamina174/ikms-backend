@@ -28,7 +28,9 @@ app = FastAPI(
 #     allow_methods=["*"],
 #     allow_headers=["*"],
 # )
-FRONTEND_URL = getenv("FRONTEND_URL", "http://localhost:3000")
+# FRONTEND_URL = getenv("FRONTEND_URL", "http://localhost:3000")
+
+FRONTEND_URL = getenv("FRONTEND_URL", "https://ikms-lake.vercel.app")
 
 app.add_middleware(
     CORSMiddleware,
