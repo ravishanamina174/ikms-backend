@@ -4,7 +4,7 @@ This module defines three LangChain agents (Retrieval, Summarization,
 Verification) and thin node functions that LangGraph uses to invoke them.
 """
 import json
-from typing import List
+from typing import Any, List
 from pydantic import ValidationError
 from ...models import PlanningOutput
 
@@ -22,11 +22,35 @@ from .state import QAState
 from .tools import retrieval_tool
 
 
+def _content_to_text(content: Any) -> str:
+    """Normalize Gemini text content, including structured content blocks."""
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str):
+            return text
+
+    return str(content)
+
+
 def _extract_last_ai_content(messages: List[object]) -> str:
     """Extract the content of the last AIMessage in a messages list."""
     for msg in reversed(messages):
         if isinstance(msg, AIMessage):
-            return str(msg.content)
+            return _content_to_text(msg.content)
     return ""
 
 planning_agent = create_agent(
@@ -59,14 +83,18 @@ def planning_node(state: QAState) -> QAState:
 
     result = planning_agent.invoke({"messages": [HumanMessage(content=question)]})
 
-    output_text = result["messages"][-1].content
+    output_text = _content_to_text(result["messages"][-1].content).strip()
+    if output_text.startswith("```json") and output_text.endswith("```"):
+        output_text = output_text[7:-3].strip()
+    elif output_text.startswith("```") and output_text.endswith("```"):
+        output_text = output_text[3:-3].strip()
 
     try:
         parsed_json = json.loads(output_text)
         
         structured_plan = PlanningOutput(**parsed_json)
 
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         raise ValueError(f"Planning agent returned invalid JSON:\n{output_text}")
 
     except ValidationError as e:

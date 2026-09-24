@@ -1,40 +1,34 @@
 from os import getenv
-from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .models import QuestionRequest, QAResponse
-from .services.qa_service import answer_question
-import openai
+from .models import QAResponse, QuestionRequest
 from .services.indexing_service import index_pdf_bytes
-from fastapi.middleware.cors import CORSMiddleware
+from .services.qa_service import answer_question
 
 
 app = FastAPI(
-    title="Class 12 Multi-Agent RAG Demo",
+    title="IKMS Multi-Agent RAG API",
     description=(
-        "Demo API for asking questions about a vector databases paper. "
-        "The `/qa` endpoint currently returns placeholder responses and "
-        "will be wired to a multi-agent RAG pipeline in later user stories."
+        "API for uploading PDFs and asking questions against the indexed knowledge base."
     ),
     version="0.1.0",
 )
 
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["http://localhost:3000"],  # frontend
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-# FRONTEND_URL = getenv("FRONTEND_URL", "http://localhost:3000")
 
-FRONTEND_URL = getenv("FRONTEND_URL", "https://ikms-lake.vercel.app")
+def _get_allowed_origins() -> list[str]:
+    raw = getenv("FRONTEND_URLS", "http://localhost:3000,https://ikms-lake.vercel.app")
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    if not origins:
+        return ["http://localhost:3000"]
+    return origins
+
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
+    allow_origins=_get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -87,22 +81,30 @@ async def qa_endpoint(payload: QuestionRequest) -> QAResponse:
     try:
         result = answer_question(question, use_planning=use_planning)
     except Exception as exc:
-        # If the error is an OpenAI authentication/authorization issue,
-        # return a helpful placeholder response instead of a 500 so the
-        # `/qa` endpoint remains reachable for testing (Postman, etc.).
+        if "503" in str(exc) or "unavailable" in str(exc).lower():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "Gemini is temporarily unavailable because the selected model is experiencing high demand. "
+                    "Please retry the question in a moment."
+                ),
+            ) from exc
+        # If the Gemini API key or quota is invalid, return a helpful placeholder
+        # instead of a 500 so the `/qa` endpoint remains reachable for testing.
         if getattr(exc, "__class__", None) is not None and (
-            exc.__class__.__name__ == "AuthenticationError"
-            or "Incorrect API key" in str(exc)
+            exc.__class__.__name__ in {"GoogleGenerativeAIError", "ValueError"}
+            or "API key" in str(exc).lower()
+            or "api_key" in str(exc).lower()
+            or "authentication" in str(exc).lower()
+            or "quota" in str(exc).lower()
         ):
             return QAResponse(
                 answer=(
-                    "LLM unavailable: invalid or missing OpenAI API key. "
-                    "Configure `OPENAI_API_KEY` in the environment or `.env` file."
+                    "LLM unavailable: invalid or missing Gemini API key, or the API quota is exhausted. "
+                    "Configure `GEMINI_API_KEY` in the environment or `.env` file."
                 ),
                 context="",
             )
-        # Re-raise other unexpected exceptions to be handled by the
-        # global exception handler.
         raise
 
     # Return only the fields defined by QAResponse
@@ -134,9 +136,44 @@ async def index_pdf(file: UploadFile = File(...)) -> dict:
     # Read the uploaded PDF into memory and index without persisting
     contents = await file.read()
 
-    # Use the bytes-based indexing helper which writes to an OS temp file
-    # only if required by the underlying loader, and cleans up after.
-    chunks_indexed = index_pdf_bytes(contents, file.filename)
+    try:
+        # Use the bytes-based indexing helper which writes to an OS temp file
+        # only if required by the underlying loader, and cleans up after.
+        chunks_indexed = index_pdf_bytes(contents, file.filename)
+    except Exception as exc:
+        message = str(exc).lower()
+        if (
+            "api key" in message
+            or "api_key" in message
+            or "authentication" in message
+        ):
+            detail = (
+                "PDF indexing failed because GEMINI_API_KEY is invalid or expired. "
+                "Create a new Gemini API key and restart the backend."
+            )
+        elif "not found" in message or "model" in message:
+            detail = (
+                "PDF indexing failed because GEMINI_EMBEDDING_MODEL_NAME is not supported. "
+                "Use GEMINI_EMBEDDING_MODEL_NAME=gemini-embedding-001."
+            )
+        elif (
+            "invalid argument" in message
+            or "quota" in message
+            or "forbidden" in message
+            or "pinecone" in message
+        ):
+            detail = (
+                "PDF indexing failed because the Gemini or Pinecone configuration is invalid. "
+                "Check GEMINI_API_KEY, PINECONE_API_KEY, and PINECONE_INDEX_NAME."
+            )
+        else:
+            raise
+
+        if detail:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=detail,
+            ) from exc
 
     return {
         "filename": file.filename,

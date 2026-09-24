@@ -2,16 +2,18 @@
 """Vector store wrapper for Pinecone integration with LangChain."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import List
 
-from pinecone import Pinecone
-from langchain_core.documents import Document
-from langchain_pinecone import PineconeVectorStore
-from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
-from pathlib import Path
-from ..config import get_settings
+from langchain_core.documents import Document
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_pinecone import PineconeVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pinecone import Pinecone
+
+from ..config import get_settings
+
 
 @lru_cache(maxsize=1)
 def _get_vector_store() -> PineconeVectorStore:
@@ -21,15 +23,33 @@ def _get_vector_store() -> PineconeVectorStore:
     pc = Pinecone(api_key=settings.pinecone_api_key)
     index = pc.Index(settings.pinecone_index_name)
 
-    embeddings = OpenAIEmbeddings(
-        model=settings.openai_embedding_model_name,
-        api_key=settings.openai_api_key,
-    )
+    candidate_models = list(dict.fromkeys([
+        settings.gemini_embedding_model_name,
+        "gemini-embedding-001",
+        "models/gemini-embedding-001",
+        "models/text-embedding-004",
+        "text-embedding-004",
+    ]))
 
-    return PineconeVectorStore(
-        index=index,
-        embedding=embeddings,
-    )
+    last_error = None
+    for model_name in candidate_models:
+        try:
+            embeddings = GoogleGenerativeAIEmbeddings(
+                model=model_name,
+                google_api_key=settings.gemini_api_key,
+                output_dimensionality=settings.gemini_embedding_dimension,
+            )
+            return PineconeVectorStore(
+                index=index,
+                embedding=embeddings,
+            )
+        except Exception as exc:  # pragma: no cover - fallback resolution path
+            last_error = exc
+
+    if last_error is not None:
+        raise last_error
+
+    raise RuntimeError("Could not create Gemini embedding model for Pinecone vector store.")
 def get_retriever(k: int | None = None):
     """Get a Pinecone retriever instance.
 

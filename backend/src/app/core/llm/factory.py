@@ -1,22 +1,25 @@
-"""Factory functions for creating LangChain v1 LLM instances."""
+"""Factory functions for creating LangChain LLM instances."""
 from functools import lru_cache
-from langchain_openai import ChatOpenAI
+
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from ..config import get_settings
 
+
 @lru_cache(maxsize=1)
-def create_chat_model(temperature: float = 0.0) -> ChatOpenAI:
-    """Create a LangChain v1 ChatOpenAI instance.
+def create_chat_model(temperature: float = 0.0) -> ChatGoogleGenerativeAI:
+    """Create a LangChain Gemini chat model instance.
 
     Args:
         temperature: Model temperature (default: 0.0 for deterministic outputs).
 
     Returns:
-        Configured ChatOpenAI instance.
+        Configured ChatGoogleGenerativeAI instance.
     """
     settings = get_settings()
-    return ChatOpenAI(
-        model=settings.openai_model_name,
-        api_key=settings.openai_api_key,
+    return ChatGoogleGenerativeAI(
+        model=settings.gemini_model_name,
+        google_api_key=settings.gemini_api_key,
         temperature=temperature,
+        max_retries=3,
     )

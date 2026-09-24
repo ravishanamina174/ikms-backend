@@ -4,79 +4,75 @@ Brief, practical README covering architecture, setup, and usage for the IKMS pro
 
 **Overview**
 - **Purpose:** Question-answering over indexed documents using a multi-agent retrieval-augmented generation (RAG) pipeline.
-- **Frontend:** Hosted at `https://ikms-lake.vercel.app` (UI for asking questions and uploading PDFs).
-- **Backend:** API and services that run the RAG agents. Repo: `https://github.com/ravishanamina174/ikms-backend` — live at `https://ikms-backend-6655.onrender.com`.
+- **Frontend:** Hosted at `https://ikms-lake.vercel.app` or run locally with `npm run dev`.
+- **Backend:** FastAPI app with Gemini LLM and Pinecone vector retrieval.
 
 **Architecture**
 - **API layer:** `backend/src/app/api.py` — exposes `/qa` and `/index-pdf` endpoints.
-- **Services:** `backend/src/app/services/` — `indexing_service.py` (PDF ingest & vector indexing) and `qa_service.py` (multi-agent orchestration).
+- **Services:** `backend/src/app/services/` — PDF ingest and QA orchestration.
 - **Core agents & tools:** `backend/src/app/core/agents/` — agent graph, prompts, tools, and state management.
-- **LLM Factory:** `backend/src/app/core/llm/factory.py` — abstracts LLM client creation.
-- **Retrieval:** `backend/src/app/core/retrieval/` — vector store + serialization helpers.
+- **LLM Factory:** `backend/src/app/core/llm/factory.py` — connects to Gemini.
+- **Retrieval:** `backend/src/app/core/retrieval/` — Pinecone vector store wrappers.
 
 Setup (local development)
-- Prereqs: `python 3.10+`, `pip`, optional `virtualenv`.
-- From repository root run:
+- Prereqs: Python 3.11+, Node 20+.
+- Backend:
 
 ```bash
-# change to backend
-cd backend
-
-# create and activate virtualenv (macOS)
+cd IKMS
 python3 -m venv .venv
 source .venv/bin/activate
-
-# install dependencies
 pip install --upgrade pip
-pip install -r requirements.txt
-
-# Set environment variables (example)
-export OPENAI_API_KEY="sk_your_key_here"
-export FRONTEND_URL="https://ikms-lake.vercel.app"
-
-# Run the API (from backend directory)
-uvicorn src.app.api:app --reload --host 0.0.0.0 --port 8000
+pip install -r backend/requirements.txt
 ```
 
-Notes:
-- The `OPENAI_API_KEY` is used by the LLM factory. If missing, the `/qa` endpoint returns a friendly placeholder.
-- `FRONTEND_URL` is configured by default to `https://ikms-lake.vercel.app` in `api.py`.
+Set the environment variables in `IKMS/.env`:
+
+```bash
+PINECONE_API_KEY=your_pinecone_key
+PINECONE_INDEX_NAME=your_index_name
+GEMINI_API_KEY=your_gemini_key
+FRONTEND_URL=http://localhost:3000
+FRONTEND_URLS=http://localhost:3000,https://ikms-lake.vercel.app
+GEMINI_MODEL_NAME=gemini-1.5-flash
+GEMINI_EMBEDDING_MODEL_NAME=models/text-embedding-004
+```
+
+Run the API:
+
+```bash
+cd IKMS/backend
+PYTHONPATH=. uvicorn src.app.api:app --reload --host 0.0.0.0 --port 8000
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
 Quick API usage
-- Index a PDF (multipart form):
+- Index a PDF:
 
 ```bash
 curl -F "file=@path/to/doc.pdf" http://localhost:8000/index-pdf
 ```
 
-- Ask a question (JSON):
+- Ask a question:
 
 ```bash
 curl -X POST http://localhost:8000/qa \
-	-H "Content-Type: application/json" \
-	-d '{"question": "What is RAG?", "use_planning": false}'
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is RAG?", "use_planning": false}'
 ```
 
-Code documentation (quick map)
-- `backend/src/app/api.py`: FastAPI application and endpoints.
-- `backend/src/app/services/indexing_service.py`: PDF ingestion and vector indexing helpers.
-- `backend/src/app/services/qa_service.py`: High-level QA orchestration; calls into the agent graph.
-- `backend/src/app/core/agents/agents.py` and `graph.py`: agent definitions and orchestration logic.
-- `backend/src/app/core/llm/factory.py`: LLM client creation and configuration.
-- `backend/src/app/core/retrieval/vector_store.py` and `serialization.py`: vector store integration and persistence.
-
-User guide / How to use
-- Upload PDFs via the `/index-pdf` endpoint to add source content to the vector store.
-- Use the `/qa` endpoint to ask natural-language questions. The response contains `answer`, optional `plan`, and `context` fields.
-- For quick testing use the provided live backend at `https://ikms-backend-6655.onrender.com` and the frontend at `https://ikms-lake.vercel.app`.
-
-Deploy & env
-- The backend is deployed at `https://ikms-backend-6655.onrender.com` (see repo above for deployment details).
-- Ensure `OPENAI_API_KEY` (or other LLM credentials) are configured in production environment variables.
+Deployment notes
+- Local frontend defaults to `http://localhost:8000` in [frontend/lib/api.ts](frontend/lib/api.ts).
+- Set `NEXT_PUBLIC_API_URL` in Vercel to the Render backend URL for deployment.
+- On Render, store `GEMINI_API_KEY`, `PINECONE_API_KEY`, and `PINECONE_INDEX_NAME` as environment variables.
 
 Contributing
-- Follow standard practice: create feature branches, run tests (if any), and open PRs against `main`.
-
-Contact
-- Repo owner: `ravishanamina174` (see GitHub repo link above).
+- Use feature branches and keep `.env` local-only.
 
